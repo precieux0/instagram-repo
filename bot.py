@@ -99,7 +99,15 @@ class InstagramBot:
     
     def login_user(self):
         """Connexion à Instagram avec gestion de session"""
-        session = self.cl.load_settings(self.session_file)
+        session = None
+        # Vérifier si le fichier session existe avant de le charger
+        if os.path.exists(self.session_file):
+            try:
+                session = self.cl.load_settings(self.session_file)
+                logger.info("📁 Session file loaded successfully")
+            except Exception as e:
+                logger.info(f"❌ Error loading session file: {e}")
+                session = None
         
         login_via_session = False
         login_via_pw = False
@@ -398,7 +406,8 @@ def schedule_bot():
         schedule.run_pending()
         time.sleep(60)  # Vérifier toutes les minutes
 
-if __name__ == "__main__":
+def main():
+    """Fonction principale pour l'exécution du bot"""
     # Vérification des variables d'environnement
     if USERNAME == 'votre_username' or PASSWORD == 'votre_password':
         logger.error("❌ Veuillez configurer INSTAGRAM_USERNAME et INSTAGRAM_PASSWORD")
@@ -416,3 +425,6 @@ if __name__ == "__main__":
             time.sleep(60)
     except KeyboardInterrupt:
         logger.info("👋 Arrêt du bot Instagram")
+
+if __name__ == "__main__":
+    main()
