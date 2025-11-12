@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: instagram-bot
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python bot.py
+    envVars:
+      - key: INSTAGRAM_USERNAME
+        value: votre_username_instagram
+      - key: INSTAGRAM_PASSWORD
+        value: votre_mot_de_passe_instagram
