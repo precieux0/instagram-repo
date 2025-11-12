@@ -25,7 +25,7 @@ logger = logging.getLogger()
 USERNAME = os.getenv('INSTAGRAM_USERNAME', 'votre_username')
 PASSWORD = os.getenv('INSTAGRAM_PASSWORD', 'votre_password')
 
-# Code de vérification reçu (à modifier si nécessaire)
+# CODE DE VÉRIFICATION REÇU PAR SMS
 VERIFICATION_CODE = "185709"
 
 class FollowManager:
@@ -77,14 +77,15 @@ class FollowManager:
 class InstagramBot:
     def __init__(self):
         self.cl = Client()
-        self.cl.delay_range = [1, 3]  # Réduit pour les tests
+        self.cl.delay_range = [1, 3]
         self.last_action_time = None
-        self.min_delay_minutes = 5    # Réduit pour les tests
+        self.min_delay_minutes = 5
         self.session_file = "session.json"
         self.follow_manager = FollowManager(self)
+        self.is_connected = False
         
     def random_delay(self, min_seconds=10, max_seconds=30):
-        """Délai aléatoire entre les actions pour simuler un comportement humain"""
+        """Délai aléatoire entre les actions"""
         delay = random.randint(min_seconds, max_seconds)
         logger.info(f"⏳ Délai de {delay} secondes...")
         time.sleep(delay)
@@ -95,7 +96,7 @@ class InstagramBot:
             elapsed = (datetime.now() - self.last_action_time).total_seconds() / 60
             if elapsed < self.min_delay_minutes:
                 wait_time = (self.min_delay_minutes - elapsed) * 60
-                logger.info(f"⏰ Respect du délai de {self.min_delay_minutes}min - Attente de {wait_time:.0f}s")
+                logger.info(f"⏰ Respect du délai - Attente de {wait_time:.0f}s")
                 time.sleep(wait_time)
         
         self.last_action_time = datetime.now()
@@ -103,85 +104,89 @@ class InstagramBot:
     def login_user(self):
         """Connexion à Instagram avec gestion de la vérification"""
         try:
-            # Configuration pour éviter les blocages
+            logger.info("🔐 Tentative de connexion avec code de vérification...")
+            
+            # Réinitialiser les paramètres
+            self.cl = Client()
+            self.cl.delay_range = [1, 3]
+            
+            # Configuration minimale
             settings = {
-                "user_agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 14_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0 Mobile/15E148 Safari/604.1",
-                "device_settings": {
-                    "app_version": "210.0.0.0.0",
-                    "android_version": 29,
-                    "android_release": "10.0",
-                    "dpi": "480dpi",
-                    "resolution": "1080x1920",
-                    "manufacturer": "Samsung",
-                    "device": "SM-G973F",
-                    "model": "Galaxy S10",
-                    "cpu": "exynos9820",
-                    "version_code": "314665256"
-                }
+                "user_agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 14_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0 Mobile/15E148 Safari/604.1"
             }
             self.cl.set_settings(settings)
             
-            # Essayer de charger la session existante
+            # Essayer la session existante
             if os.path.exists(self.session_file):
                 try:
-                    session = self.cl.load_settings(self.session_file)
-                    self.cl.set_settings(session)
-                    self.cl.login(USERNAME, PASSWORD)
+                    self.cl.load_settings(self.session_file)
+                    logger.info("📁 Session chargée")
                     
                     # Vérifier si la session est valide
-                    self.cl.get_timeline_feed()
-                    logger.info("✅ Connecté via session existante")
-                    return True
-                except Exception as e:
-                    logger.info(f"🔄 Session invalide: {e}")
-            
-            # CONNEXION AVEC GESTION DE LA VÉRIFICATION
-            logger.info("🔐 Tentative de connexion avec gestion de vérification...")
-            
-            # Méthode avec code de vérification intégré
-            try:
-                # Essayer sans code d'abord
-                self.cl.login(USERNAME, PASSWORD)
-            except Exception as e:
-                if "checkpoint" in str(e).lower() or "verification" in str(e).lower():
-                    logger.info("📱 Instagram demande une vérification")
-                    logger.info(f"🔢 Utilisation du code: {VERIFICATION_CODE}")
-                    
                     try:
-                        # Utiliser le code de vérification
-                        self.cl.handle_2fa = True
-                        self.cl.login(USERNAME, PASSWORD, verification_code=VERIFICATION_CODE)
-                        logger.info("✅ Connexion réussie avec code de vérification")
-                    except Exception as verify_error:
-                        logger.error(f"❌ Erreur avec le code de vérification: {verify_error}")
-                        return False
+                        self.cl.get_timeline_feed()
+                        logger.info("✅ Connecté via session existante")
+                        self.is_connected = True
+                        return True
+                    except LoginRequired:
+                        logger.info("🔄 Session expirée")
+                except Exception as e:
+                    logger.info(f"❌ Erreur chargement session: {e}")
+            
+            # CONNEXION AVEC CODE DE VÉRIFICATION
+            logger.info(f"🔢 Utilisation du code de vérification: {VERIFICATION_CODE}")
+            
+            try:
+                # Activer la gestion 2FA
+                self.cl.handle_2fa = True
+                
+                # Connexion avec code de vérification
+                login_result = self.cl.login(USERNAME, PASSWORD, verification_code=VERIFICATION_CODE)
+                
+                if login_result:
+                    logger.info("✅ Connexion réussie avec code de vérification!")
+                    self.cl.dump_settings(self.session_file)
+                    self.is_connected = True
+                    return True
                 else:
-                    logger.error(f"❌ Erreur de connexion: {e}")
+                    logger.error("❌ Échec de connexion avec code")
                     return False
-            
-            # Sauvegarder la session pour les prochaines connexions
-            self.cl.dump_settings(self.session_file)
-            logger.info("💾 Session sauvegardée")
-            return True
-            
+                    
+            except Exception as login_error:
+                logger.error(f"❌ Erreur lors de la connexion avec code: {login_error}")
+                
+                # Essayer sans code en dernier recours
+                logger.info("🔄 Tentative sans code de vérification...")
+                try:
+                    login_result = self.cl.login(USERNAME, PASSWORD)
+                    if login_result:
+                        logger.info("✅ Connexion réussie sans code!")
+                        self.cl.dump_settings(self.session_file)
+                        self.is_connected = True
+                        return True
+                except Exception as final_error:
+                    logger.error(f"💥 Échec final: {final_error}")
+                    return False
+                
         except Exception as e:
             logger.error(f"💥 Erreur critique de connexion: {e}")
             return False
     
-    def safe_activity(self, activity_func, activity_name):
-        """Exécuter une activité de manière sécurisée"""
+    def get_timeline_feed_safe(self, amount=10):
+        """Récupérer le feed de manière sécurisée"""
         try:
-            self.action_cooldown()
-            result = activity_func()
-            logger.info(f"✅ {activity_name} terminé avec succès")
-            return result
+            # Méthode sans paramètre amount qui cause l'erreur
+            feed = self.cl.get_timeline_feed()
+            # Limiter manuellement le nombre de posts
+            return feed[:amount] if feed else []
         except Exception as e:
-            logger.error(f"❌ Erreur pendant {activity_name}: {e}")
-            return False
+            logger.error(f"❌ Erreur récupération feed: {e}")
+            return []
     
     def like_post(self, media_id):
         """Like une publication"""
         try:
+            self.action_cooldown()
             result = self.cl.media_like(media_id)
             logger.info(f"❤️ Publication likée")
             self.random_delay(5, 15)
@@ -190,24 +195,10 @@ class InstagramBot:
             logger.error(f"❌ Erreur like: {e}")
             return False
     
-    def comment_post(self, media_id, comment_text):
-        """Commenter une publication"""
-        try:
-            if len(comment_text) < 2 or len(comment_text) > 200:
-                logger.warning("⚠️ Commentaire trop court ou trop long")
-                return False
-            
-            result = self.cl.media_comment(media_id, comment_text)
-            logger.info(f"💬 Commentaire ajouté")
-            self.random_delay(10, 20)
-            return result
-        except Exception as e:
-            logger.error(f"❌ Erreur commentaire: {e}")
-            return False
-    
     def follow_user(self, user_id):
         """Suivre un utilisateur"""
         try:
+            self.action_cooldown()
             result = self.cl.user_follow(user_id)
             logger.info(f"👤 Utilisateur suivi")
             self.follow_manager.record_follow(user_id, f"user_{user_id}")
@@ -217,21 +208,10 @@ class InstagramBot:
             logger.error(f"❌ Erreur follow: {e}")
             return False
     
-    def unfollow_user(self, user_id):
-        """Ne plus suivre un utilisateur"""
-        try:
-            result = self.cl.user_unfollow(user_id)
-            logger.info(f"🚫 Utilisateur unfollow")
-            self.follow_manager.mark_unfollowed(user_id)
-            self.random_delay(20, 40)
-            return result
-        except Exception as e:
-            logger.error(f"❌ Erreur unfollow: {e}")
-            return False
-    
     def get_reels(self, amount=3):
         """Récupérer des reels populaires"""
         try:
+            self.action_cooldown()
             reels = self.cl.clips_popular(amount=amount)
             logger.info(f"🎥 {len(reels)} reels récupérés")
             return reels
@@ -253,16 +233,21 @@ class InstagramBot:
     def simple_activity_session(self):
         """Session d'activités simples et sécurisées"""
         try:
+            if not self.is_connected:
+                logger.error("❌ Non connecté à Instagram")
+                return False
+            
             logger.info("🚀 Début session d'activités")
             
-            # 1. Vérifier le feed
-            feed = self.cl.get_timeline_feed(amount=5)
+            # 1. Vérifier le feed (méthode corrigée)
+            feed = self.get_timeline_feed_safe(5)
             logger.info(f"📱 Feed chargé: {len(feed)} posts")
             
             # 2. Like 1-2 posts
             if feed:
                 for post in feed[:2]:
                     self.like_post(post.id)
+                    break  # Un like seulement pour tester
             
             self.random_delay(10, 20)
             
@@ -272,35 +257,38 @@ class InstagramBot:
                 self.watch_reel(reel.id)
                 if random.random() > 0.5:  # 50% chance de liker
                     self.like_post(reel.id)
+                break  # Un reel seulement pour tester
             
-            # 4. Follow 1-2 utilisateurs suggérés
-            suggestions = self.cl.suggested_users(amount=5)
-            follows = 0
-            for user in suggestions.users[:2]:
-                if not self.cl.user_friendship(user.pk).following:
-                    self.follow_user(user.pk)
-                    follows += 1
-                    if follows >= 2:
-                        break
+            # 4. Follow 1 utilisateur suggéré
+            try:
+                suggestions = self.cl.suggested_users(amount=3)
+                for user in suggestions.users[:1]:
+                    if not self.cl.user_friendship(user.pk).following:
+                        self.follow_user(user.pk)
+                        break  # Un follow seulement
+            except Exception as e:
+                logger.warning(f"⚠️ Impossible de suivre: {e}")
             
-            logger.info(f"📊 Session terminée: {follows} follows")
+            logger.info("✅ Session terminée avec succès")
             return True
             
         except Exception as e:
             logger.error(f"❌ Erreur session: {e}")
             return False
     
-    def simulate_human_activity(self, duration_hours=2):
-        """Simule une présence humaine pendant plusieurs heures"""
-        logger.info(f"🤖 Début simulation d'activité pour {duration_hours}h")
+    def simulate_human_activity(self, duration_hours=1):
+        """Simule une présence humaine"""
+        logger.info(f"🤖 Début simulation pour {duration_hours}h")
         
         start_time = datetime.now()
         end_time = start_time + timedelta(hours=duration_hours)
         session_count = 0
         
-        while datetime.now() < end_time and session_count < 6:  # Max 6 sessions
+        while datetime.now() < end_time and session_count < 3:
             try:
                 session_count += 1
+                logger.info(f"🔄 Session {session_count}")
+                
                 success = self.simple_activity_session()
                 
                 if success:
@@ -308,16 +296,17 @@ class InstagramBot:
                 else:
                     logger.warning(f"⚠️ Session {session_count} échouée")
                 
-                # Pause entre les sessions (20-40 minutes)
-                pause_time = random.randint(1200, 2400)
-                logger.info(f"💤 Pause de {pause_time//60} minutes")
-                time.sleep(pause_time)
+                # Pause entre les sessions (10-20 minutes)
+                if datetime.now() < end_time and session_count < 3:
+                    pause_time = random.randint(600, 1200)
+                    logger.info(f"💤 Pause de {pause_time//60} minutes")
+                    time.sleep(pause_time)
                 
             except Exception as e:
                 logger.error(f"❌ Erreur activité: {e}")
-                time.sleep(300)  # Attendre 5 minutes en cas d'erreur
+                time.sleep(300)
         
-        logger.info(f"🎯 Simulation terminée: {session_count} sessions effectuées")
+        logger.info(f"🎯 Simulation terminée: {session_count} sessions")
 
 def run_scheduled_bot():
     """Fonction planifiée pour exécuter le bot"""
@@ -329,8 +318,8 @@ def run_scheduled_bot():
         # Connexion
         if bot.login_user():
             # Session d'activités
-            bot.simulate_human_activity(duration_hours=2)
-            logger.info("✅ Session planifiée terminée avec succès")
+            bot.simulate_human_activity(duration_hours=1)
+            logger.info("✅ Session terminée avec succès")
         else:
             logger.error("❌ Impossible de se connecter, session annulée")
         
@@ -344,34 +333,33 @@ def schedule_bot():
     schedule.every().day.at("16:00").do(run_scheduled_bot)
     schedule.every().day.at("20:00").do(run_scheduled_bot)
     
-    logger.info("📅 Planificateur démarré - routines à 10h, 16h et 20h")
+    logger.info("📅 Planificateur démarré")
     
     while True:
         schedule.run_pending()
         time.sleep(60)
 
 def main():
-    """Fonction principale pour l'exécution du bot"""
-    # Vérification des variables d'environnement
+    """Fonction principale"""
     if USERNAME == 'votre_username' or PASSWORD == 'votre_password':
-        logger.error("❌ Veuillez configurer INSTAGRAM_USERNAME et INSTAGRAM_PASSWORD")
+        logger.error("❌ Configurer INSTAGRAM_USERNAME et INSTAGRAM_PASSWORD")
         exit(1)
     
-    logger.info("🤖 Démarrage du Bot Instagram")
+    logger.info("🤖 Bot Instagram démarré")
     
-    # Démarrer le planificateur dans un thread séparé
+    # Démarrer le planificateur
     scheduler_thread = Thread(target=schedule_bot, daemon=True)
     scheduler_thread.start()
     
-    # Exécuter une session immédiate
+    # Session immédiate
     run_scheduled_bot()
     
-    # Garder le script actif
+    # Maintenir actif
     try:
         while True:
             time.sleep(60)
     except KeyboardInterrupt:
-        logger.info("👋 Arrêt du bot Instagram")
+        logger.info("👋 Arrêt du bot")
 
 if __name__ == "__main__":
     main()
